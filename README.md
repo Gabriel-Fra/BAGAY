@@ -1,5 +1,5 @@
 # BAGAY
-- An Event-Sourced Registry for Barangay Public Infrastructure
+An Event-Sourced Registry for Barangay Public Infrastructure
 
 **BAGAY** is an event-sourced registry designed to track and preserve the complete history of barangay public infrastructure. Instead of overwriting an asset's previous status, BAGAY records every update as an immutable event, allowing its current state and historical records to be reconstructed at any time.
 
