@@ -1,9 +1,0 @@
-# Core (the demo needs nothing else)
-fastapi>=0.110
-uvicorn[standard]>=0.29
-rfc8785>=0.1.2          # RFC 8785 canonical JSON: the hash input must be canonical
-segno>=1.6              # QR tags for assets
-
-# Optional
-psycopg[binary]>=3.1    # only if BAGAY_DB points at PostgreSQL
-pytest>=8.0             # tests
