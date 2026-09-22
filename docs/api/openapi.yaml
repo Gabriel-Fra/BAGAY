@@ -1,0 +1,543 @@
+# BAGAY API sketch (OpenAPI 3.1). Validated with openapi-spec-validator.
+openapi: 3.1.0
+info:
+  title: BAGAY API
+  version: 0.1.0
+  description: 'Two services behind one gateway.
+
+    - Command API (Java 21, Spring Boot): /api/commands/*  writes events, never reads projections for decisions.
+
+    - Query API (Python 3.12, FastAPI): /api/*, /public/*  reads projections, runs verification and exports.
+
+    Every command carries a client-generated commandId (UUIDv7) used as the event_id idempotency key,
+
+    and the expectedVersion of the asset stream the user was looking at.
+
+    '
+servers:
+- url: https://bagay.example/{psgc}
+  variables:
+    psgc:
+      default: '0000000000'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    CommandMeta:
+      type: object
+      required:
+      - commandId
+      - expectedVersion
+      - occurredAt
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        expectedVersion:
+          type: integer
+          minimum: 0
+        occurredAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+          - WEB
+          - PWA_OFFLINE
+    Accepted:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        globalPosition:
+          type: integer
+        streamVersion:
+          type: integer
+        eventHash:
+          type: string
+        duplicate:
+          type: boolean
+          description: True when the commandId was already applied
+    Conflict:
+      type: object
+      properties:
+        streamId:
+          type: string
+        currentVersion:
+          type: integer
+        eventsSince:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEntry'
+    TimelineEntry:
+      type: object
+      properties:
+        position:
+          type: integer
+        version:
+          type: integer
+        type:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        trust:
+          type: string
+          enum:
+          - PUBLIC_CLAIM
+          - OFFICER_ATTESTED
+          - APPROVED
+        summary:
+          type: string
+        hash:
+          type: string
+    AssetCard:
+      type: object
+      properties:
+        assetId:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        condition:
+          type: string
+        purok:
+          type: string
+        lastInspectedAt:
+          type: string
+          format: date-time
+        lastRepairedAt:
+          type: string
+          format: date-time
+        openIssues:
+          type: integer
+        streamVersion:
+          type: integer
+        streamHeadHash:
+          type: string
+    VerificationReport:
+      type: object
+      properties:
+        verifiedThrough:
+          type: integer
+        headHash:
+          type: string
+        checkpointsChecked:
+          type: integer
+        ok:
+          type: boolean
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              position:
+                type: integer
+              kind:
+                type: string
+                enum:
+                - GAP_OR_REORDER
+                - BROKEN_LINK
+                - BROKEN_STREAM
+                - CONTENT_ALTERED
+                - TRUNCATED
+                - CHECKPOINT_MISMATCH
+              detail:
+                type: string
+  responses:
+    Accepted:
+      description: Event appended (or already appended for this commandId)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Accepted'
+    Conflict:
+      description: The asset changed since the user loaded it; client must rebase
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Conflict'
+security:
+- bearer: []
+paths:
+  /public/assets/{assetId}:
+    get:
+      summary: QR landing page data (sanitised public projection)
+      security: []
+      responses:
+        '200':
+          description: Asset card and public timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset:
+                    $ref: '#/components/schemas/AssetCard'
+                  timeline:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TimelineEntry'
+                  latestCheckpoint:
+                    type: object
+                    properties:
+                      position:
+                        type: integer
+                      hash:
+                        type: string
+                      at:
+                        type: string
+      operationId: get_public_assets_assetId
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /public/assets/{assetId}/reports:
+    post:
+      summary: Resident issue report (becomes IssueReported, trust PUBLIC_CLAIM)
+      security: []
+      description: Rate limited per device and per asset; requires a challenge token; photos uploaded first to /public/uploads.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - commandId
+              - issueCategory
+              - challengeToken
+              properties:
+                commandId:
+                  type: string
+                  format: uuid
+                issueCategory:
+                  type: string
+                description:
+                  type: string
+                  maxLength: 500
+                photoHashes:
+                  type: array
+                  items:
+                    type: string
+                  maxItems: 3
+                followUpMobile:
+                  type: string
+                  description: Optional. Stored only in the encrypted vault, never in the event.
+                challengeToken:
+                  type: string
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_public_assets_assetId_reports
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /public/checkpoints:
+    get:
+      summary: All published checkpoints (for witnesses and the Full Disclosure board)
+      security: []
+      responses:
+        '200':
+          description: List of checkpoints with signatures
+      operationId: get_public_checkpoints
+  /api/commands/assets:
+    post:
+      summary: Register an asset (AssetRegistered)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/CommandMeta'
+              - type: object
+                properties:
+                  asset:
+                    type: object
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      operationId: post_api_commands_assets
+  /api/commands/assets/{assetId}/inspections:
+    post:
+      summary: Record an inspection (InspectionRecorded)
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      operationId: post_api_commands_assets_assetId_inspections
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/damage:
+    post:
+      summary: Record damage, optionally linked to a hazard (DamageRecorded)
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      operationId: post_api_commands_assets_assetId_damage
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/issues/{issueId}/triage:
+    post:
+      summary: Accept, merge or reject a resident report (IssueTriaged)
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_assets_assetId_issues_issueId_triage
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/work-orders:
+    post:
+      summary: Open a work order (WorkOrderOpened)
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_assets_assetId_work_orders
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/work-orders/{workOrderId}/start:
+    post:
+      summary: RepairStarted
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_assets_assetId_work_orders_workOrderId_start
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: workOrderId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/work-orders/{workOrderId}/complete:
+    post:
+      summary: RepairCompleted
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_assets_assetId_work_orders_workOrderId_complete
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: workOrderId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/custody:
+    post:
+      summary: CustodyAssigned or CustodyTransferred
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_assets_assetId_custody
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/assets/{assetId}/unserviceable:
+    post:
+      summary: Propose unserviceable declaration (needs PUNONG_BARANGAY approval to emit AssetDeclaredUnserviceable)
+      responses:
+        '202':
+          description: Pending approval
+      operationId: post_api_commands_assets_assetId_unserviceable
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/approvals/{approvalId}:
+    post:
+      summary: Approve or decline a pending high-impact command
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_approvals_approvalId
+    parameters:
+    - name: approvalId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/events/{eventId}/corrections:
+    post:
+      summary: Append EntryCorrected (the original event is never edited)
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_events_eventId_corrections
+    parameters:
+    - name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/commands/hazards:
+    post:
+      summary: HazardDeclared
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_hazards
+  /api/commands/turnover/seal:
+    post:
+      summary: Create a TURNOVER checkpoint, publish it to witnesses, append TurnoverSealed
+      responses:
+        '201':
+          $ref: '#/components/responses/Accepted'
+      operationId: post_api_commands_turnover_seal
+  /api/commands/batch:
+    post:
+      summary: Replay an offline outbox from the PWA in order; returns one result per command
+      responses:
+        '207':
+          description: Multi-status; each item is Accepted, Duplicate or Conflict
+      operationId: post_api_commands_batch
+  /api/assets:
+    get:
+      summary: Filterable registry (category, status, purok, condition)
+      responses:
+        '200':
+          description: Page of AssetCard
+      operationId: get_api_assets
+  /api/assets/{assetId}/timeline:
+    get:
+      summary: Full history including internal entries; ?asOf=<position|date> rebuilds state at a past point
+      responses:
+        '200':
+          description: Timeline and reconstructed state
+      operationId: get_api_assets_assetId_timeline
+    parameters:
+    - name: assetId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/queue/issues:
+    get:
+      summary: Issue inbox
+      responses:
+        '200':
+          description: OK
+      operationId: get_api_queue_issues
+  /api/queue/work-orders:
+    get:
+      summary: Maintenance queue
+      responses:
+        '200':
+          description: OK
+      operationId: get_api_queue_work_orders
+  /api/insights/reliability:
+    get:
+      summary: MTBF, MTTR, cost and risk per asset
+      responses:
+        '200':
+          description: OK
+      operationId: get_api_insights_reliability
+  /api/insights/hazards/{hazardId}:
+    get:
+      summary: Damage and disruption counts by category (SDG 11.5.3 style)
+      responses:
+        '200':
+          description: OK
+      operationId: get_api_insights_hazards_hazardId
+    parameters:
+    - name: hazardId
+      in: path
+      required: true
+      schema:
+        type: string
+  /api/verify:
+    post:
+      summary: Run full chain verification against the stored and externally supplied checkpoints
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                witnessCheckpoints:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      position:
+                        type: integer
+                      hash:
+                        type: string
+      responses:
+        '200':
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationReport'
+      operationId: post_api_verify
+  /api/exports/turnover-pack:
+    get:
+      summary: ZIP with events.jsonl, checkpoints.json, verifier script, and a printable PDF summary per asset
+      responses:
+        '200':
+          description: application/zip
+      operationId: get_api_exports_turnover_pack
+  /api/admin/projections/{name}/rebuild:
+    post:
+      summary: Drop and replay one projection from position 0
+      responses:
+        '202':
+          description: Rebuild started
+      operationId: post_api_admin_projections_name_rebuild
+    parameters:
+    - name: name
+      in: path
+      required: true
+      schema:
+        type: string

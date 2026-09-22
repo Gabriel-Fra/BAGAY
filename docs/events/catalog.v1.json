@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bagay.example/events/catalog.v1.json",
+  "title": "BAGAY event payload catalog, version 1",
+  "description": "Payload schemas for every event type. The envelope (ids, versions, actor, trust level, hashes) is defined by table es.events. Payloads never hold raw personal data; people are referenced by subject_ref (vault) or by role.",
+  "$defs": {
+    "money": { "type": "number", "minimum": 0, "multipleOf": 0.01 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "category": {
+      "type": "string",
+      "enum": ["STREETLIGHT", "DRAINAGE", "ROAD_PATHWAY", "FOOTBRIDGE", "BARANGAY_HALL", "COVERED_COURT",
+               "HEALTH_STATION", "DAY_CARE", "EVACUATION_CENTER", "WATER_SYSTEM", "CCTV", "GENERATOR",
+               "VEHICLE", "RESCUE_EQUIPMENT", "OTHER"]
+    },
+    "condition": { "type": "string", "enum": ["GOOD", "FAIR", "POOR", "UNSAFE"] },
+    "location": {
+      "type": "object",
+      "required": ["purok"],
+      "properties": {
+        "purok": { "type": "string" },
+        "street": { "type": "string" },
+        "lat": { "type": "number", "minimum": 4, "maximum": 22 },
+        "lng": { "type": "number", "minimum": 116, "maximum": 127 }
+      }
+    },
+    "fund_source": {
+      "type": "string",
+      "enum": ["BARANGAY_DEVELOPMENT_FUND", "GENERAL_FUND", "SK_FUND", "BDRRMF", "LGU_AID", "NATIONAL_GRANT", "DONATION", "OTHER"]
+    }
+  },
+  "events": {
+    "RegistryInitialized": {
+      "stream": "barangay:{psgc}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["psgc", "barangay_name", "municipality", "province"],
+        "properties": {
+          "psgc": { "type": "string", "pattern": "^[0-9]{9,10}$" },
+          "barangay_name": { "type": "string" },
+          "municipality": { "type": "string" },
+          "province": { "type": "string" },
+          "term_label": { "type": "string", "examples": ["2026-2030"] }
+        }
+      }
+    },
+    "AssetRegistered": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["asset_id", "name", "category", "location"],
+        "properties": {
+          "asset_id": { "type": "string", "pattern": "^BGY-[0-9]{9,10}-[A-Z]{2}-[0-9]{5}$" },
+          "name": { "type": "string", "maxLength": 120 },
+          "category": { "$ref": "#/$defs/category" },
+          "location": { "$ref": "#/$defs/location" },
+          "property_no": { "type": "string", "description": "COA property number when the asset is capitalised" },
+          "acquired_on": { "type": "string", "format": "date" },
+          "acquisition_cost": { "$ref": "#/$defs/money" },
+          "fund_source": { "$ref": "#/$defs/fund_source" },
+          "project_ref": { "type": "string", "description": "Optional SubayBAYAN or procurement reference" },
+          "backfilled": { "type": "boolean", "description": "True when entered from paper records after the fact" }
+        }
+      }
+    },
+    "CustodyAssigned": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["custodian_role"],
+        "properties": {
+          "custodian_role": { "type": "string" },
+          "custodian_subject_ref": { "type": "string", "format": "uuid" },
+          "document_ref": { "type": "string", "description": "PAR or ICS number" }
+        }
+      }
+    },
+    "IssueReported": {
+      "stream": "asset:{asset_id}",
+      "trust": "PUBLIC_CLAIM",
+      "payload": {
+        "type": "object",
+        "required": ["issue_id", "issue_category"],
+        "properties": {
+          "issue_id": { "type": "string", "format": "uuid" },
+          "issue_category": { "type": "string", "enum": ["NOT_WORKING", "DAMAGED", "UNSAFE", "CLOGGED", "MISSING", "OTHER"] },
+          "description": { "type": "string", "maxLength": 500 },
+          "photo_hashes": { "type": "array", "items": { "$ref": "#/$defs/sha256" }, "maxItems": 3 },
+          "reporter_subject_ref": { "type": "string", "format": "uuid", "description": "Only if the resident opts in to follow-up" }
+        }
+      }
+    },
+    "IssueTriaged": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["issue_id", "decision"],
+        "properties": {
+          "issue_id": { "type": "string", "format": "uuid" },
+          "decision": { "type": "string", "enum": ["ACCEPTED", "DUPLICATE", "REJECTED"] },
+          "duplicate_of": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "InspectionRecorded": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["condition"],
+        "properties": {
+          "condition": { "$ref": "#/$defs/condition" },
+          "checklist": { "type": "object", "additionalProperties": { "type": "boolean" } },
+          "findings": { "type": "string", "maxLength": 1000 },
+          "photo_hashes": { "type": "array", "items": { "$ref": "#/$defs/sha256" } },
+          "gps": { "$ref": "#/$defs/location" }
+        }
+      }
+    },
+    "DamageRecorded": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["severity", "service_disrupted"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["MINOR", "MAJOR", "DESTROYED"] },
+          "service_disrupted": { "type": "boolean" },
+          "hazard_id": { "type": "string", "description": "Links the damage to a declared hazard (SDG 11.5.3 counts)" },
+          "estimated_cost": { "$ref": "#/$defs/money" },
+          "description": { "type": "string" },
+          "photo_hashes": { "type": "array", "items": { "$ref": "#/$defs/sha256" } }
+        }
+      }
+    },
+    "WorkOrderOpened": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["work_order_id", "priority"],
+        "properties": {
+          "work_order_id": { "type": "string", "format": "uuid" },
+          "priority": { "type": "string", "enum": ["P1", "P2", "P3", "P4"] },
+          "assigned_role": { "type": "string" },
+          "due_on": { "type": "string", "format": "date" },
+          "source_issue_id": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "RepairStarted": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["work_order_id"],
+        "properties": { "work_order_id": { "type": "string", "format": "uuid" } }
+      }
+    },
+    "RepairCompleted": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["work_order_id", "resulting_condition"],
+        "properties": {
+          "work_order_id": { "type": "string", "format": "uuid" },
+          "resulting_condition": { "$ref": "#/$defs/condition" },
+          "actual_cost": { "$ref": "#/$defs/money" },
+          "fund_source": { "$ref": "#/$defs/fund_source" },
+          "performed_by": { "type": "string", "enum": ["BARANGAY_WORKER", "CONTRACTOR", "LGU_ENGINEERING", "VOLUNTEER"] },
+          "document_ref": { "type": "string", "description": "Disbursement voucher or purchase order number" },
+          "photo_hashes": { "type": "array", "items": { "$ref": "#/$defs/sha256" } }
+        }
+      }
+    },
+    "CustodyTransferred": {
+      "stream": "asset:{asset_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["from_role", "to_role", "reason"],
+        "properties": {
+          "from_role": { "type": "string" },
+          "to_role": { "type": "string" },
+          "reason": { "type": "string", "enum": ["TURNOVER", "REASSIGNMENT", "RETURN"] },
+          "document_ref": { "type": "string" }
+        }
+      }
+    },
+    "AssetDeclaredUnserviceable": {
+      "stream": "asset:{asset_id}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["reason", "approved_by_role"],
+        "properties": {
+          "reason": { "type": "string" },
+          "iirup_ref": { "type": "string", "description": "Inventory and Inspection Report of Unserviceable Property reference" },
+          "approved_by_role": { "const": "PUNONG_BARANGAY" }
+        }
+      }
+    },
+    "AssetDisposed": {
+      "stream": "asset:{asset_id}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["mode"],
+        "properties": {
+          "mode": { "type": "string", "enum": ["SALE", "TRANSFER", "DESTRUCTION", "DONATION"] },
+          "document_ref": { "type": "string" }
+        }
+      }
+    },
+    "EntryCorrected": {
+      "stream": "same stream as the corrected event",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["corrects_event_id", "reason", "corrections"],
+        "properties": {
+          "corrects_event_id": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string", "minLength": 10 },
+          "corrections": { "type": "object", "description": "JSON-pointer to corrected value, e.g. {\"/actual_cost\": 4200}" }
+        }
+      }
+    },
+    "HazardDeclared": {
+      "stream": "hazard:{hazard_id}",
+      "trust": "OFFICER_ATTESTED",
+      "payload": {
+        "type": "object",
+        "required": ["hazard_id", "name", "hazard_type", "started_on"],
+        "properties": {
+          "hazard_id": { "type": "string" },
+          "name": { "type": "string", "description": "Use the PAGASA local name for tropical cyclones" },
+          "hazard_type": { "type": "string", "enum": ["TYPHOON", "FLOOD", "EARTHQUAKE", "FIRE", "OTHER"] },
+          "started_on": { "type": "string", "format": "date" },
+          "ended_on": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    "UserEnrolled": {
+      "stream": "user:{user_id}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["user_id", "role", "term_label"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "role": { "type": "string" },
+          "term_label": { "type": "string" },
+          "subject_ref": { "type": "string", "format": "uuid" }
+        }
+      }
+    },
+    "UserDeactivated": {
+      "stream": "user:{user_id}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["user_id", "reason"],
+        "properties": { "user_id": { "type": "string", "format": "uuid" }, "reason": { "type": "string" } }
+      }
+    },
+    "TurnoverSealed": {
+      "stream": "barangay:{psgc}",
+      "trust": "APPROVED",
+      "payload": {
+        "type": "object",
+        "required": ["checkpoint_position", "checkpoint_hash", "outgoing_term", "incoming_term", "witnesses"],
+        "properties": {
+          "checkpoint_position": { "type": "integer", "minimum": 1 },
+          "checkpoint_hash": { "$ref": "#/$defs/sha256" },
+          "outgoing_term": { "type": "string" },
+          "incoming_term": { "type": "string" },
+          "asset_count": { "type": "integer" },
+          "witnesses": { "type": "array", "items": { "type": "string" }, "description": "Roles, e.g. BIT_CSO_REP, CMLGOO" },
+          "inventory_form_ref": { "type": "string", "description": "DILG turnover inventory form reference" }
+        }
+      }
+    }
+  }
+}
