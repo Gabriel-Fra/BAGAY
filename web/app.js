@@ -308,17 +308,65 @@ function mountScanner(onDetected, onClose) {
   fileInput.onchange = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    status.textContent = 'Processing uploaded QR image…';
+    status.textContent = 'Scanning uploaded image…';
     const reader = new FileReader();
     reader.onload = async () => {
+      const dataUrl = reader.result;
+      // 1. Try on-device jsQR first
       try {
-        const res = await api('/api/qr/decode', { method: 'POST', body: { dataUrl: reader.result } });
-        if (res && res.found && res.asset_id) {
-          handleSuccess(res.asset_id);
-        } else {
-          status.textContent = 'No QR code found in photo. Please try again.';
+        const img = new Image();
+        img.onload = async () => {
+          const offscreen = document.createElement('canvas');
+          const offctx = offscreen.getContext('2d', { willReadFrequently: true });
+          offscreen.width = img.naturalWidth || img.width;
+          offscreen.height = img.naturalHeight || img.height;
+          offctx.drawImage(img, 0, 0);
+
+          if (window.jsQR) {
+            const idata = offctx.getImageData(0, 0, offscreen.width, offscreen.height);
+            const qrRes = window.jsQR(idata.data, offscreen.width, offscreen.height, {
+              inversionAttempts: 'attemptBoth'
+            });
+            if (qrRes && qrRes.data) {
+              const match = qrRes.data.match(/(BGY-[A-Za-z0-9-]+)/i);
+              const aid = match ? match[1].toUpperCase() : qrRes.data.trim().toUpperCase();
+              if (aid) {
+                handleSuccess(aid);
+                return;
+              }
+            }
+          }
+
+          // 2. Try native BarcodeDetector on the image canvas
+          if ('BarcodeDetector' in window) {
+            try {
+              const bd = new window.BarcodeDetector({ formats: ['qr_code'] });
+              const codes = await bd.detect(offscreen);
+              if (codes && codes.length > 0) {
+                const val = codes[0].rawValue || '';
+                const match = val.match(/(BGY-[A-Za-z0-9-]+)/i);
+                const aid = match ? match[1].toUpperCase() : val.trim().toUpperCase();
+                if (aid) {
+                  handleSuccess(aid);
+                  return;
+                }
+              }
+            } catch (_) {}
+          }
+
+          // 3. Fallback to server-side multi-pass ArUco OpenCV detector
+          try {
+            const res = await api('/api/qr/decode', { method: 'POST', body: { dataUrl } });
+            if (res && res.found && res.asset_id) {
+              handleSuccess(res.asset_id);
+              return;
+            }
+          } catch (_) {}
+
+          status.textContent = 'No QR code found in photo. Please try a clearer angle.';
           toast('No QR code detected in that image. Try a clearer angle.');
-        }
+        };
+        img.src = dataUrl;
       } catch (err) {
         status.textContent = 'Error processing photo.';
         toast('QR decode error: ' + err.message);
@@ -369,14 +417,39 @@ function mountScanner(onDetected, onClose) {
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    let frameCount = 0;
 
     timer = setInterval(async () => {
       if (!active || isScanning || video.readyState < 2) return;
       isScanning = true;
+      frameCount++;
 
       try {
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        if (!w || !h) return;
+
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+
+        // Pass 1: jsQR (Instant client-side detection)
+        if (window.jsQR) {
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const code = window.jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (code && code.data) {
+            const match = code.data.match(/(BGY-[A-Za-z0-9-]+)/i);
+            const aid = match ? match[1].toUpperCase() : code.data.trim().toUpperCase();
+            if (aid) {
+              handleSuccess(aid);
+              return;
+            }
+          }
+        }
+
+        // Pass 2: Hardware-accelerated BarcodeDetector
         if (barcodeDetector) {
-          const codes = await barcodeDetector.detect(video).catch(() => []);
+          const codes = await barcodeDetector.detect(canvas).catch(() => []);
           if (codes && codes.length > 0) {
             const val = codes[0].rawValue || '';
             const match = val.match(/(BGY-[A-Za-z0-9-]+)/i);
@@ -388,26 +461,21 @@ function mountScanner(onDetected, onClose) {
           }
         }
 
-        const w = video.videoWidth || 640;
-        const h = video.videoHeight || 480;
-        const targetW = 480;
-        const targetH = Math.round((h / w) * targetW) || 360;
-        canvas.width = targetW;
-        canvas.height = targetH;
-        ctx.drawImage(video, 0, 0, targetW, targetH);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-
-        const res = await api('/api/qr/decode', { method: 'POST', body: { dataUrl } });
-        if (res && res.found && res.asset_id) {
-          handleSuccess(res.asset_id);
-          return;
+        // Pass 3: Periodic server fallback (every 5th frame, ~500ms)
+        if (frameCount % 5 === 0) {
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const res = await api('/api/qr/decode', { method: 'POST', body: { dataUrl } }).catch(() => null);
+          if (res && res.found && res.asset_id) {
+            handleSuccess(res.asset_id);
+            return;
+          }
         }
       } catch (_) {
-        // continue scan
+        // continue scanning
       } finally {
         isScanning = false;
       }
-    }, 280);
+    }, 100);
   }
 
   startCamera();

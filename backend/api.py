@@ -187,17 +187,43 @@ def decode_qr(body: dict = Body(...)):
         arr = np.frombuffer(raw, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is not None:
-            detector = cv2.QRCodeDetector()
-            val, _, _ = detector.detectAndDecode(img)
-            text = (val or "").strip()
+            detectors = []
+            if hasattr(cv2, "QRCodeDetectorAruco"):
+                detectors.append(cv2.QRCodeDetectorAruco())
+            detectors.append(cv2.QRCodeDetector())
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+            passes = [img, gray]
+            try:
+                thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                               cv2.THRESH_BINARY, 51, 0)
+                passes.append(thresh)
+                passes.append(cv2.bitwise_not(gray))
+            except Exception:
+                pass
+
+            for det in detectors:
+                for p in passes:
+                    try:
+                        val, _, _ = det.detectAndDecode(p)
+                        if val and val.strip():
+                            text = val.strip()
+                            break
+                    except Exception:
+                        pass
+                if text:
+                    break
+
             if not text:
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                val, _, _ = detector.detectAndDecode(gray)
-                text = (val or "").strip()
-            if not text:
-                resized = cv2.resize(img, (0, 0), fx=1.5, fy=1.5, interpolation=cv2.INTER_LINEAR)
-                val, _, _ = detector.detectAndDecode(resized)
-                text = (val or "").strip()
+                try:
+                    resized = cv2.resize(gray, (0, 0), fx=1.5, fy=1.5, interpolation=cv2.INTER_LINEAR)
+                    for det in detectors:
+                        val, _, _ = det.detectAndDecode(resized)
+                        if val and val.strip():
+                            text = val.strip()
+                            break
+                except Exception:
+                    pass
     except Exception:
         pass
 

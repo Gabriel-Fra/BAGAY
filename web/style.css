@@ -812,10 +812,16 @@ input:focus, select:focus, textarea:focus {
 }
 
 .qr-card img {
-  width: 140px;
-  height: 140px;
+  width: 160px;
+  height: 160px;
   margin-bottom: 8px;
   border-radius: 4px;
+  background: #FFFFFF;
+  padding: 6px;
+  border: 1px solid var(--border);
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 .qr-card b {
