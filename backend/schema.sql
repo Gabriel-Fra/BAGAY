@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS proj_asset_timeline (
   summary_fil     TEXT NOT NULL,
   is_public       INTEGER NOT NULL,
   event_hash      TEXT NOT NULL,
-  payload         TEXT NOT NULL
+  payload         TEXT NOT NULL,
+  photo_ref       TEXT
 );
 
 CREATE INDEX IF NOT EXISTS proj_timeline_asset ON proj_asset_timeline (asset_id, stream_version);
@@ -113,7 +114,9 @@ CREATE TABLE IF NOT EXISTS proj_issue_inbox (
   status       TEXT NOT NULL,
   duplicate_of TEXT,
   reported_at  TEXT NOT NULL,
-  triaged_at   TEXT
+  triaged_at   TEXT,
+  reported_by  TEXT,
+  photo_ref    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proj_work_queue (
@@ -148,9 +151,24 @@ CREATE TABLE IF NOT EXISTS proj_hazard_damage (
   estimated_cost    REAL
 );
 
+-- Login material. Deliberately separate from es_events: the event log never carries
+-- a password hash or anything else that identifies a person, per the no-personal-data
+-- rule in CLAUDE.md. actor_id on an event is just this table's opaque user_id.
 CREATE TABLE IF NOT EXISTS iam_users (
-  user_id      TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL,
-  role         TEXT NOT NULL,
-  term_label   TEXT
+  user_id       TEXT PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  display_name  TEXT NOT NULL,
+  role          TEXT NOT NULL,
+  term_label    TEXT,
+  purok         TEXT,
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS iam_sessions (
+  session_id TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
 );

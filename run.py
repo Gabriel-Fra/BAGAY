@@ -29,6 +29,9 @@ def main() -> int:
         print("Seeding Barangay Halimbawa ...", flush=True)
         info = seed.build(conn)
         print(f"  {info['events']} events, {info['assets']} assets, head {info['head_hash'][:16]}")
+        print("\n  Demo logins (username / password):")
+        for acc in info["accounts"]:
+            print(f"    {acc['username']:<12} {acc['password']:<16} {acc['role']}")
     else:
         projector.run_once(conn)
         print(f"Log has {head['position']} events, head {head['head_hash'][:16]}")

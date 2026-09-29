@@ -54,14 +54,27 @@ def _apply_registry(conn: db.Conn, e: dict) -> None:
 
     en, fil = catalog.summarize(e)
     _, public = catalog.EVENTS[e["event_type"]]
+    photo_ref = _first_photo(e)
     tl = (e["global_position"], asset_id, e["stream_version"], e["event_type"], e["occurred_at"],
           e["recorded_at"], e["trust_level"], e["actor_role"], en, fil, 1 if public else 0,
-          e["event_hash"], e["payload"])
+          e["event_hash"], e["payload"], photo_ref)
     verb = "INSERT OR REPLACE INTO" if not db.IS_PG else "INSERT INTO"
     tail = "" if not db.IS_PG else " ON CONFLICT (global_position) DO NOTHING"
     conn.execute(f"{verb} proj_asset_timeline (global_position, asset_id, stream_version, event_type, "
                  f"occurred_at, recorded_at, trust_level, actor_role, summary_en, summary_fil, "
-                 f"is_public, event_hash, payload) VALUES ({', '.join('?' * len(tl))}){tail}", tl)
+                 f"is_public, event_hash, payload, photo_ref) "
+                 f"VALUES ({', '.join('?' * len(tl))}){tail}", tl)
+
+
+def _first_photo(e: dict) -> str | None:
+    """First attached photo's URL, if any. Attachments ride in the hashed envelope already;
+    this just surfaces one for the read models so the UI does not have to parse JSON."""
+    raw = e.get("attachments")
+    items = json.loads(raw) if isinstance(raw, str) else (raw or [])
+    for item in items:
+        if isinstance(item, dict) and item.get("url"):
+            return item["url"]
+    return None
 
 
 # --------------------------------------------------------------------------- issues + work orders
@@ -72,9 +85,10 @@ def _apply_workflow(conn: db.Conn, e: dict) -> None:
     if t == "IssueReported":
         verb = "INSERT OR REPLACE INTO" if not db.IS_PG else "INSERT INTO"
         conn.execute(f"{verb} proj_issue_inbox (issue_id, asset_id, category, description, status, "
-                     f"reported_at) VALUES (?, ?, ?, ?, 'NEW', ?)",
+                     f"reported_at, reported_by, photo_ref) VALUES (?, ?, ?, ?, 'NEW', ?, ?, ?)",
                      (p["issue_id"], asset_id, p.get("issue_category", "OTHER"),
-                      p.get("description", ""), e["occurred_at"]))
+                      p.get("description", ""), e["occurred_at"], e.get("actor_id"),
+                      _first_photo(e)))
     elif t == "IssueTriaged":
         conn.execute("UPDATE proj_issue_inbox SET status = ?, duplicate_of = ?, triaged_at = ? "
                      "WHERE issue_id = ?",

@@ -6,18 +6,24 @@ process so that `python run.py` is the only thing anyone has to type.
 """
 from __future__ import annotations
 
+import asyncio
+import base64
+import hashlib
 import io
 import json
 import pathlib
+import queue
 import zipfile
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import catalog, chain, commands, db, projector
+from . import auth, catalog, chain, commands, db, projector
 
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
+MEDIA = pathlib.Path(__file__).resolve().parent.parent / "media"
+MEDIA.mkdir(exist_ok=True)
 app = FastAPI(title="BAGAY demo", version="0.1.0")
 
 
@@ -31,9 +37,138 @@ def _pump():
     projector.run_once(conn())
 
 
+# =============================================================== auth
+def get_current_user(session: str | None = Cookie(None, alias=auth.COOKIE_NAME)) -> dict | None:
+    return auth.current_user(conn(), session)
+
+
+def require_user(user: dict | None = Depends(get_current_user)) -> dict:
+    if not user:
+        raise HTTPException(401, "log in first")
+    return user
+
+
+def require_official(user: dict = Depends(require_user)) -> dict:
+    if user["role"] not in auth.OFFICIAL_ROLES:
+        raise HTTPException(403, "an official account is needed for this")
+    return user
+
+
+def _set_session_cookie(resp: JSONResponse, session_id: str) -> JSONResponse:
+    resp.set_cookie(auth.COOKIE_NAME, session_id, httponly=True, samesite="lax",
+                    max_age=auth.SESSION_TTL_HOURS * 3600)
+    return resp
+
+
+@app.post("/api/auth/register")
+def register(body: dict = Body(...)):
+    """Residents only: self-serve sign-up so anyone can file a report without an official
+    creating their account first. Officials are provisioned by the demo seed instead."""
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    display_name = (body.get("displayName") or username).strip()
+    purok = body.get("purok")
+    if len(username) < 3:
+        raise HTTPException(400, "username needs at least 3 characters")
+    if len(password) < 8:
+        raise HTTPException(400, "password needs at least 8 characters")
+    try:
+        user = auth.create_user(conn(), username=username, password=password,
+                                display_name=display_name, role="PUBLIC", purok=purok)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    session_id = auth.start_session(conn(), user["user_id"])
+    return _set_session_cookie(
+        JSONResponse({"user": {"userId": user["user_id"], "username": user["username"],
+                               "displayName": user["display_name"], "role": user["role"],
+                               "purok": user["purok"]}}), session_id)
+
+
+@app.post("/api/auth/login")
+def login(body: dict = Body(...)):
+    row = auth.verify_password(conn(), username=body.get("username", ""),
+                               password=body.get("password", ""))
+    if not row:
+        raise HTTPException(401, "wrong username or password")
+    session_id = auth.start_session(conn(), row["user_id"])
+    return _set_session_cookie(JSONResponse({"user": auth.public_user(row)}), session_id)
+
+
+@app.post("/api/auth/logout")
+def logout(session: str | None = Cookie(None, alias=auth.COOKIE_NAME)):
+    if session:
+        auth.end_session(conn(), session)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE_NAME)
+    return resp
+
+
+@app.get("/api/auth/me")
+def me(user: dict | None = Depends(get_current_user)):
+    return {"user": auth.public_user(user) if user else None}
+
+
+# =============================================================== live feed (phone -> PC)
+_subscribers: set[queue.SimpleQueue] = set()
+
+
+def _broadcast(payload: dict) -> None:
+    for q in list(_subscribers):
+        q.put(payload)
+
+
+@app.get("/api/stream")
+async def stream(user: dict = Depends(require_user)):
+    """Server-Sent Events: whatever a resident's phone submits shows up here within a
+    couple seconds on every open dashboard, no polling, no extra dependency."""
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _subscribers.add(q)
+
+    async def gen():
+        try:
+            yield "retry: 3000\nevent: ready\ndata: {}\n\n"
+            while True:
+                try:
+                    payload = await asyncio.to_thread(q.get, True, 20)
+                    yield f"data: {json.dumps(payload)}\n\n"
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+        finally:
+            _subscribers.discard(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# =============================================================== photos
+@app.post("/api/photos")
+def upload_photo(body: dict = Body(...), user: dict = Depends(require_user)):
+    """Client re-encodes the capture through a <canvas> before it ever gets here, which
+    strips EXIF (GPS, device id) for free — no server-side image library required."""
+    data_url = body.get("dataUrl", "")
+    if not data_url.startswith("data:image/"):
+        raise HTTPException(400, "expected a data: image URL")
+    header, _, b64 = data_url.partition(",")
+    content_type = header[5:].split(";")[0]
+    ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}.get(content_type, "jpg")
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as exc:                                    # noqa: BLE001
+        raise HTTPException(400, "could not decode photo") from exc
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(413, "photo is too large (8 MB max)")
+    digest = hashlib.sha256(raw).hexdigest()
+    sub = MEDIA / digest[:2]
+    sub.mkdir(exist_ok=True)
+    path = sub / f"{digest}.{ext}"
+    if not path.exists():
+        path.write_bytes(raw)
+    return {"hash": digest, "contentType": content_type, "url": f"/media/{digest[:2]}/{digest}.{ext}"}
+
+
 # =============================================================== queries
 @app.get("/api/overview")
-def overview():
+def overview(user: dict = Depends(require_official)):
     c = conn()
     _pump()
     counts = c.one("SELECT COUNT(*) AS assets, "
@@ -56,7 +191,8 @@ def overview():
 
 
 @app.get("/api/assets")
-def list_assets(q: str = "", status: str = "", category: str = "", limit: int = 100):
+def list_assets(q: str = "", status: str = "", category: str = "", limit: int = 100,
+                user: dict = Depends(require_official)):
     _pump()
     sql = "SELECT * FROM proj_asset_current WHERE 1 = 1"
     params: list = []
@@ -76,7 +212,8 @@ def list_assets(q: str = "", status: str = "", category: str = "", limit: int = 
 
 
 @app.get("/api/assets/{asset_id}")
-def asset_detail(asset_id: str, as_of: int | None = Query(None, description="global position")):
+def asset_detail(asset_id: str, as_of: int | None = Query(None, description="global position"),
+                 user: dict = Depends(require_official)):
     c = conn()
     _pump()
     card = c.one("SELECT * FROM proj_asset_current WHERE asset_id = ?", (asset_id,))
@@ -92,9 +229,21 @@ def asset_detail(asset_id: str, as_of: int | None = Query(None, description="glo
     return result
 
 
+@app.get("/public/sample-asset")
+def sample_asset(user: dict = Depends(require_user)):
+    """A NEEDS_ATTENTION asset id to try the resident flow with when there is no QR tag
+    in hand yet (e.g. scan /a/{asset_id} directly once tags are printed)."""
+    c = conn()
+    _pump()
+    row = (c.one("SELECT asset_id FROM proj_asset_current WHERE status = 'NEEDS_ATTENTION' "
+                "ORDER BY RANDOM() LIMIT 1")
+           or c.one("SELECT asset_id FROM proj_asset_current ORDER BY RANDOM() LIMIT 1"))
+    return {"assetId": (row or {}).get("asset_id")}
+
+
 @app.get("/public/assets/{asset_id}")
-def public_asset(asset_id: str):
-    """What a resident sees after scanning the QR tag: no login, no internal notes."""
+def public_asset(asset_id: str, user: dict = Depends(require_user)):
+    """What a resident sees after scanning the QR tag and signing in: no internal notes."""
     c = conn()
     _pump()
     card = c.one("SELECT asset_id, name, category, purok, status, condition, last_inspected_at, "
@@ -109,8 +258,20 @@ def public_asset(asset_id: str):
     return {"asset": card, "timeline": timeline, "latest_checkpoint": cp}
 
 
+@app.get("/api/my/reports")
+def my_reports(user: dict = Depends(require_user)):
+    """A resident's own reports and their status. Nobody else's."""
+    c = conn()
+    _pump()
+    rows = c.query("SELECT i.*, a.name AS asset_name FROM proj_issue_inbox i "
+                   "LEFT JOIN proj_asset_current a ON a.asset_id = i.asset_id "
+                   "WHERE i.reported_by = ? ORDER BY i.reported_at DESC LIMIT 100",
+                   (user["user_id"],))
+    return {"reports": rows}
+
+
 @app.get("/api/queue")
-def queues():
+def queues(user: dict = Depends(require_official)):
     c = conn()
     _pump()
     return {
@@ -125,7 +286,7 @@ def queues():
 
 
 @app.get("/api/insights")
-def insights():
+def insights(user: dict = Depends(require_official)):
     c = conn()
     _pump()
     by_category = c.query(
@@ -150,58 +311,69 @@ def insights():
 
 # =============================================================== commands
 @app.post("/api/commands/{event_type}")
-def command(event_type: str, body: dict = Body(...)):
+def command(event_type: str, body: dict = Body(...), user: dict = Depends(require_official)):
     c = conn()
     try:
         row = commands.submit(
             c, asset_id=body.get("assetId"), stream_id=body.get("streamId"),
             event_type=event_type, payload=body.get("payload", {}),
-            actor_role=body.get("actorRole", "SECRETARY"),
+            actor_role=user["role"], actor_id=user["user_id"],
             expected_version=body.get("expectedVersion"),
             command_id=body.get("commandId"), occurred_at=body.get("occurredAt"),
-            source=body.get("source", "WEB"))
+            source=body.get("source", "WEB"), attachments=body.get("attachments"))
     except commands.Denied as exc:
         raise HTTPException(403, str(exc)) from exc
     except chain.Conflict as exc:
         return JSONResponse(status_code=409, content={"error": "conflict", "streamId": exc.stream_id,
                                                       "currentVersion": exc.current_version})
     _pump()
+    if not row.get("duplicate"):
+        _broadcast({"kind": "event", "eventType": event_type, "assetId": body.get("assetId"),
+                   "globalPosition": row["global_position"], "actorRole": user["role"],
+                   "actorName": user["display_name"]})
     return {"eventId": row["event_id"], "globalPosition": row["global_position"],
             "streamVersion": row["stream_version"], "eventHash": row["event_hash"],
             "duplicate": row.get("duplicate", False)}
 
 
 @app.post("/public/assets/{asset_id}/reports")
-def public_report(asset_id: str, body: dict = Body(...)):
+def public_report(asset_id: str, body: dict = Body(...), user: dict = Depends(require_user)):
+    if user["role"] != "PUBLIC":
+        raise HTTPException(403, "official accounts record findings through the dashboard instead")
     c = conn()
     row = commands.report_issue(c, asset_id=asset_id,
                                 issue_category=body.get("issueCategory", "OTHER"),
                                 description=body.get("description", ""),
-                                command_id=body.get("commandId"))
+                                command_id=body.get("commandId"), actor_id=user["user_id"],
+                                attachments=body.get("attachments"))
     _pump()
+    if not row.get("duplicate"):
+        _broadcast({"kind": "report", "eventType": "IssueReported", "assetId": asset_id,
+                   "globalPosition": row["global_position"], "actorName": user["display_name"],
+                   "purok": user.get("purok")})
     return {"eventId": row["event_id"], "globalPosition": row["global_position"]}
 
 
 # =============================================================== integrity
 @app.post("/api/verify")
-def verify(use_witness: bool = True):
+def verify(use_witness: bool = True, user: dict = Depends(require_official)):
     return chain.verify(conn(), use_witness=use_witness)
 
 
 @app.get("/api/checkpoints")
-def checkpoints():
+def checkpoints(user: dict = Depends(require_official)):
     c = conn()
     return {"checkpoints": c.query("SELECT * FROM es_checkpoints ORDER BY position DESC LIMIT 20"),
             "witness": chain.witness_checkpoints(c)}
 
 
 @app.post("/api/checkpoints")
-def make_checkpoint(reason: str = "MANUAL"):
+def make_checkpoint(reason: str = "MANUAL", user: dict = Depends(require_official)):
     return chain.create_checkpoint(conn(), reason=reason)
 
 
 @app.post("/api/turnover/seal")
-def seal(body: dict = Body(default={})):
+def seal(body: dict = Body(default={}), user: dict = Depends(require_official)):
     row = commands.seal_turnover(
         conn(), psgc=body.get("psgc", "0000000000"),
         outgoing_term=body.get("outgoingTerm", "2023-2026"),
@@ -212,7 +384,7 @@ def seal(body: dict = Body(default={})):
 
 
 @app.get("/api/exports/turnover-pack")
-def turnover_pack():
+def turnover_pack(user: dict = Depends(require_official)):
     """Everything an incoming administration needs, and nothing it has to trust."""
     c = conn()
     buf = io.BytesIO()
@@ -237,7 +409,8 @@ def turnover_pack():
 
 # =============================================================== demo controls
 @app.post("/api/demo/tamper")
-def tamper(mode: str = Query("edit", pattern="^(edit|delete|truncate|rewrite)$")):
+def tamper(mode: str = Query("edit", pattern="^(edit|delete|truncate|rewrite)$"),
+           user: dict = Depends(require_official)):
     """DEMO ONLY. Plays the insider who can switch the database guard rails off.
 
     This endpoint does not exist in the real system. It is here so the demo can show what
@@ -248,7 +421,7 @@ def tamper(mode: str = Query("edit", pattern="^(edit|delete|truncate|rewrite)$")
 
 
 @app.post("/api/demo/reset")
-def reset_demo():
+def reset_demo(user: dict = Depends(require_official)):
     """Wipe and re-seed, so a demo can be run again from a clean state."""
     from . import seed
     c = conn()
@@ -258,7 +431,7 @@ def reset_demo():
 
 
 @app.post("/api/admin/rebuild")
-def rebuild():
+def rebuild(user: dict = Depends(require_official)):
     """Delete every read model and replay the log. Proves the projections are disposable."""
     c = conn()
     before = c.one("SELECT COUNT(*) AS c FROM proj_asset_current")["c"]
@@ -269,7 +442,7 @@ def rebuild():
 
 
 @app.get("/api/log")
-def log_tail(limit: int = 30, after: int = 0):
+def log_tail(limit: int = 30, after: int = 0, user: dict = Depends(require_official)):
     rows = chain.read_events(conn(), after=after, limit=limit)
     rows.reverse()
     return {"events": [{k: r[k] for k in ("global_position", "stream_id", "stream_version",
@@ -294,4 +467,5 @@ def favicon():
     return FileResponse(path) if path.exists() else JSONResponse({}, status_code=404)
 
 
+app.mount("/media", StaticFiles(directory=str(MEDIA)), name="media")
 app.mount("/static", StaticFiles(directory=str(WEB)), name="static")

@@ -76,7 +76,8 @@ def shared() -> Conn:
 
 TABLES = ("es_events", "es_chain_head", "es_stream_heads", "es_checkpoints", "witness_checkpoints",
           "proj_consumer_offsets", "proj_asset_current", "proj_asset_timeline", "proj_issue_inbox",
-          "proj_work_queue", "proj_hazard_events", "proj_hazard_damage", "iam_users")
+          "proj_work_queue", "proj_hazard_events", "proj_hazard_damage", "iam_users",
+          "iam_sessions")
 
 
 def wipe(conn: "Conn") -> None:

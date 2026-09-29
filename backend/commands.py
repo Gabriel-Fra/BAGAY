@@ -42,7 +42,7 @@ def load_asset(conn: db.Conn, asset_id: str, as_of_position: int | None = None) 
 def submit(conn: db.Conn, *, asset_id: str | None, event_type: str, payload: dict,
            actor_role: str, actor_id: str | None = None, expected_version: int | None = None,
            command_id: str | None = None, occurred_at=None, stream_id: str | None = None,
-           source: str = "WEB") -> dict:
+           source: str = "WEB", attachments: list | None = None) -> dict:
     """One entry point for every command. Returns the appended event row."""
     if event_type not in catalog.EVENTS:
         raise Denied(f"unknown event type {event_type}")
@@ -63,7 +63,7 @@ def submit(conn: db.Conn, *, asset_id: str | None, event_type: str, payload: dic
     return chain.append(
         conn, stream_id=stream, event_type=event_type, payload=payload,
         actor_id=actor_id or f"user:{actor_role.lower()}", actor_role=actor_role,
-        trust_level=trust, source=source, occurred_at=occurred_at,
+        trust_level=trust, source=source, occurred_at=occurred_at, attachments=attachments,
         expected_version=expected_version if stream.startswith("asset:") else None,
         event_id=command_id or str(uuid.uuid4()))
 
@@ -81,24 +81,29 @@ def register_asset(conn, *, asset_id, name, category, purok, acquired_on=None,
 
 
 def record_inspection(conn, *, asset_id, condition, findings="", actor_role="FIELD_WORKER",
-                      occurred_at=None, command_id=None, expected_version=None):
+                      actor_id=None, occurred_at=None, command_id=None, expected_version=None,
+                      attachments=None):
     return submit(conn, asset_id=asset_id, event_type="InspectionRecorded", actor_role=actor_role,
-                  occurred_at=occurred_at, command_id=command_id, expected_version=expected_version,
+                  actor_id=actor_id, occurred_at=occurred_at, command_id=command_id,
+                  expected_version=expected_version, attachments=attachments,
                   payload={"condition": condition, "findings": findings})
 
 
 def record_damage(conn, *, asset_id, severity, service_disrupted=False, hazard_id=None,
-                  estimated_cost=0, actor_role="FIELD_WORKER", occurred_at=None, command_id=None):
+                  estimated_cost=0, actor_role="FIELD_WORKER", actor_id=None, occurred_at=None,
+                  command_id=None, attachments=None):
     return submit(conn, asset_id=asset_id, event_type="DamageRecorded", actor_role=actor_role,
-                  occurred_at=occurred_at, command_id=command_id,
+                  actor_id=actor_id, occurred_at=occurred_at, command_id=command_id,
+                  attachments=attachments,
                   payload={"severity": severity, "service_disrupted": bool(service_disrupted),
                            "hazard_id": hazard_id, "estimated_cost": estimated_cost})
 
 
-def report_issue(conn, *, asset_id, issue_category, description="", command_id=None, occurred_at=None):
+def report_issue(conn, *, asset_id, issue_category, description="", command_id=None, occurred_at=None,
+                 actor_id=None, attachments=None):
     return submit(conn, asset_id=asset_id, event_type="IssueReported", actor_role="PUBLIC",
-                  actor_id="public:qr", source="QR_PUBLIC", command_id=command_id,
-                  occurred_at=occurred_at,
+                  actor_id=actor_id or "public:qr", source="QR_PUBLIC", command_id=command_id,
+                  occurred_at=occurred_at, attachments=attachments,
                   payload={"issue_id": str(uuid.uuid4()), "issue_category": issue_category,
                            "description": description})
 

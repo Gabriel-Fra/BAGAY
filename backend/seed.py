@@ -9,7 +9,16 @@ from __future__ import annotations
 import datetime as dt
 import random
 
-from . import chain, commands, db, projector
+from . import auth, chain, commands, db, projector
+
+# Demo login accounts. Real deployments provision these properly; here every password is
+# printed on the login screen itself so a class demo can hand out logins in ten seconds.
+DEMO_ACCOUNTS = [
+    ("kapitana", "Barangay2026!", "Kap. Rosa Villanueva", "PUNONG_BARANGAY", None),
+    ("secretary", "Barangay2026!", "Ana Dela Cruz", "SECRETARY", None),
+    ("fieldworker", "Barangay2026!", "Mico Santos", "FIELD_WORKER", None),
+    ("resident", "Barangay2026!", "Julma Reyes", "PUBLIC", "Purok 3"),
+]
 
 PSGC = "1380600000"                       # illustrative code, not a real barangay
 BARANGAY = "Barangay Halimbawa"
@@ -143,8 +152,18 @@ def build(conn: db.Conn, *, assets_per_category=1.0, seed: int = 20260915) -> di
 
     chain.create_checkpoint(conn, reason="SCHEDULED")
     projector.rebuild_all(conn)
+
+    for username, password, display_name, role, purok in DEMO_ACCOUNTS:
+        try:
+            auth.create_user(conn, username=username, password=password,
+                             display_name=display_name, role=role, purok=purok)
+        except ValueError:
+            pass                                          # already seeded (e.g. --seed-only twice)
+
     head = chain.head(conn)
-    return {"events": head["position"], "head_hash": head["head_hash"], "assets": len(assets)}
+    return {"events": head["position"], "head_hash": head["head_hash"], "assets": len(assets),
+            "accounts": [{"username": u, "password": p, "role": r}
+                        for u, p, _, r, _ in DEMO_ACCOUNTS]}
 
 
 if __name__ == "__main__":
