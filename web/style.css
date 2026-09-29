@@ -942,6 +942,71 @@ input:focus, select:focus, textarea:focus {
   pointer-events: none;
 }
 
+/* ---------------------------------------------------------------- Asset Loading Screen */
+.loading-screen {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--ph-blue);
+  border-radius: var(--radius);
+  padding: 32px 20px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3.5px solid var(--bg-muted);
+  border-top-color: var(--ph-blue);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  margin-bottom: 14px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-screen h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.loading-screen p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 48ch;
+}
+
+.loading-asset-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--ph-blue-light);
+  border: 1px solid #BFDBFE;
+  color: var(--ph-blue);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
 /* ---------------------------------------------------------------- Notifications & Utilities */
 .live-dot {
   width: 8px;

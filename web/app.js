@@ -589,8 +589,103 @@ async function reportView(main) {
   </div>`);
   main.append(picker);
 
+  const detailArea = el('<div id="reportDetailArea"></div>');
+  main.append(detailArea);
+
   let activeScanner = null;
+  let loadingAsset = false;
+
+  async function loadAssetDetail(aid) {
+    if (!aid || loadingAsset) return;
+    loadingAsset = true;
+    state.asset = aid;
+    picker.querySelector('#aid').value = aid;
+
+    if (activeScanner) {
+      activeScanner.cleanup();
+      activeScanner.el.remove();
+      activeScanner = null;
+    }
+    qrSection.style.display = 'none';
+    picker.querySelectorAll('button, input').forEach(b => b.disabled = true);
+
+    detailArea.innerHTML = '';
+    detailArea.append(el(`<div class="loading-screen" id="assetLoadingCard">
+      <div class="spinner"></div>
+      <h3>Na-scan ang QR Code · Loading Asset Record</h3>
+      <p>Kinukuha ang rekord ng pasilidad mula sa opisyal na rehistro…<br>Fetching municipal registry status and maintenance history…</p>
+      <div class="loading-asset-tag">
+        <span class="live-dot" style="background:var(--ph-blue);box-shadow:none"></span>
+        ${esc(aid)}
+      </div>
+    </div>`));
+
+    try {
+      const d = await api(`/public/assets/${encodeURIComponent(aid)}`);
+      renderAssetForm(d);
+    } catch (e) {
+      detailArea.innerHTML = `<div class="bad-box">Could not find asset "${esc(aid)}". Please check the ID and try again.</div>`;
+    } finally {
+      loadingAsset = false;
+      picker.querySelectorAll('button, input').forEach(b => b.disabled = false);
+    }
+  }
+
+  function renderAssetForm(d) {
+    detailArea.innerHTML = '';
+    const a = d.asset;
+    const card = el(`<div class="card">
+      <div class="row spread"><b>${esc(a.name)}</b>${pill(a.status)}</div>
+      <p class="note" style="margin:2px 0 10px">${esc(a.asset_id)} · ${esc(a.purok || '')} · condition ${esc(a.condition || '—')}</p>
+      <div class="tl">${d.timeline.slice(0, 5).map(t => `<div class="e"><b>${esc(t.summary_fil)}</b>
+        <small>${esc(t.summary_en)}</small><small>${day(t.occurred_at)} · ${pill(t.trust_level)}</small></div>`).join('') || '<p class="note">No public history yet.</p>'}</div>
+    </div>`);
+    detailArea.append(card);
+
+    const cap = mountCapture(null, 'Kunan ng larawan · Take or upload photo');
+    const form = el(`<div class="card">
+      <div class="row spread" style="margin-bottom:8px"><b>Iulat ang problema · Describe the problem</b></div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="kind" style="flex:1">
+          <option value="NOT_WORKING">Hindi gumagana · Not working</option>
+          <option value="DAMAGED">Sira · Damaged</option>
+          <option value="CLOGGED">Barado · Clogged</option>
+          <option value="UNSAFE">Delikado · Unsafe</option>
+          <option value="MISSING">Nawawala · Missing</option>
+        </select>
+      </div>
+      <textarea id="desc" rows="3" style="width:100%" placeholder="Optional details (e.g. location notes, hazard)..."></textarea>
+    </div>`);
+    detailArea.append(form);
+    detailArea.append(cap.el);
+
+    const submitBar = el(`<div class="card row spread">
+      <span class="note">Filed as a resident claim — an officer confirms it before repairs are scheduled.</span>
+      <button class="act gold" id="submit">Isumite ang Ulat · Submit report</button></div>`);
+    detailArea.append(submitBar);
+
+    submitBar.querySelector('#submit').onclick = async () => {
+      const btn = submitBar.querySelector('#submit');
+      const attachment = cap.getAttachment();
+      if (attachment === undefined) { toast('Still uploading the photo — one moment.'); return; }
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const r = await api(`/public/assets/${encodeURIComponent(state.asset)}/reports`, { method: 'POST', body: {
+          issueCategory: form.querySelector('#kind').value,
+          description: form.querySelector('#desc').value,
+          attachments: attachment ? [attachment] : [],
+        } });
+        toast(`Report filed as event #${r.globalPosition}. Track it under "My reports".`);
+        go('my');
+      } catch (e) {
+        toast(e.data && e.data.detail ? e.data.detail : e.message);
+        btn.disabled = false; btn.textContent = 'Isumite ang Ulat · Submit report';
+      }
+    };
+  }
+
   picker.querySelector('#scanBtn').onclick = () => {
+    if (loadingAsset) return;
     if (activeScanner) {
       activeScanner.cleanup();
       activeScanner.el.remove();
@@ -598,9 +693,7 @@ async function reportView(main) {
       return;
     }
     activeScanner = mountScanner((aid) => {
-      picker.querySelector('#aid').value = aid;
-      activeScanner = null;
-      go('report', aid);
+      loadAssetDetail(aid);
     }, () => {
       activeScanner = null;
     });
@@ -614,78 +707,34 @@ async function reportView(main) {
     qrSection.style.display = 'none';
   };
   qrSection.querySelectorAll('.qr-card').forEach(card => {
-    card.onclick = () => go('report', card.dataset.aid);
+    card.onclick = () => loadAssetDetail(card.dataset.aid);
   });
 
   picker.querySelector('#open').onclick = () => {
     const v = picker.querySelector('#aid').value.trim();
-    if (v) go('report', v);
+    if (v) loadAssetDetail(v);
   };
-  picker.querySelector('#aid').onkeydown = (e) => { if (e.key === 'Enter') picker.querySelector('#open').click(); };
-  picker.querySelector('#sample').onclick = async () => {
-    const s = await api('/public/sample-asset');
-    if (s.assetId) go('report', s.assetId); else toast('No sample asset available yet.');
-  };
-
-  if (!state.asset) {
-    main.append(el('<div class="empty">Enter an asset ID above, or click "Sample QR Codes" to scan or select a demo asset.</div>'));
-    return;
-  }
-
-  let d;
-  try { d = await api(`/public/assets/${encodeURIComponent(state.asset)}`); }
-  catch (e) {
-    main.append(el(`<div class="bad-box">Could not find that asset. Check the ID and try again.</div>`));
-    return;
-  }
-  const a = d.asset;
-  const card = el(`<div class="card">
-    <div class="row spread"><b>${esc(a.name)}</b>${pill(a.status)}</div>
-    <p class="note" style="margin:2px 0 10px">${esc(a.asset_id)} · ${esc(a.purok || '')} · condition ${esc(a.condition || '—')}</p>
-    <div class="tl">${d.timeline.slice(0, 5).map(t => `<div class="e"><b>${esc(t.summary_fil)}</b>
-      <small>${esc(t.summary_en)}</small><small>${day(t.occurred_at)} · ${pill(t.trust_level)}</small></div>`).join('') || '<p class="note">No public history yet.</p>'}</div>
-  </div>`);
-  main.append(card);
-
-  const cap = mountCapture(null, 'Kunan ng larawan · Take or upload photo');
-  const form = el(`<div class="card">
-    <div class="row spread" style="margin-bottom:8px"><b>Iulat ang problema · Describe the problem</b></div>
-    <div class="row" style="margin-bottom:10px">
-      <select id="kind" style="flex:1">
-        <option value="NOT_WORKING">Hindi gumagana · Not working</option>
-        <option value="DAMAGED">Sira · Damaged</option>
-        <option value="CLOGGED">Barado · Clogged</option>
-        <option value="UNSAFE">Delikado · Unsafe</option>
-        <option value="MISSING">Nawawala · Missing</option>
-      </select>
-    </div>
-    <textarea id="desc" rows="3" style="width:100%" placeholder="Optional details (e.g. location notes, hazard)..."></textarea>
-  </div>`);
-  main.append(form);
-  main.append(cap.el);
-
-  const submitBar = el(`<div class="card row spread">
-    <span class="note">Filed as a resident claim — an officer confirms it before repairs are scheduled.</span>
-    <button class="act gold" id="submit">Isumite ang Ulat · Submit report</button></div>`);
-  main.append(submitBar);
-  submitBar.querySelector('#submit').onclick = async () => {
-    const btn = submitBar.querySelector('#submit');
-    const attachment = cap.getAttachment();
-    if (attachment === undefined) { toast('Still uploading the photo — one moment.'); return; }
-    btn.disabled = true; btn.textContent = 'Sending…';
-    try {
-      const r = await api(`/public/assets/${encodeURIComponent(state.asset)}/reports`, { method: 'POST', body: {
-        issueCategory: form.querySelector('#kind').value,
-        description: form.querySelector('#desc').value,
-        attachments: attachment ? [attachment] : [],
-      } });
-      toast(`Report filed as event #${r.globalPosition}. Track it under "My reports".`);
-      go('my');
-    } catch (e) {
-      toast(e.data && e.data.detail ? e.data.detail : e.message);
-      btn.disabled = false; btn.textContent = 'Isumite ang Ulat · Submit report';
+  picker.querySelector('#aid').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      const v = picker.querySelector('#aid').value.trim();
+      if (v) loadAssetDetail(v);
     }
   };
+  picker.querySelector('#sample').onclick = async () => {
+    if (loadingAsset) return;
+    try {
+      const s = await api('/public/sample-asset');
+      if (s.assetId) loadAssetDetail(s.assetId); else toast('No sample asset available yet.');
+    } catch (e) {
+      toast('Could not fetch sample asset: ' + e.message);
+    }
+  };
+
+  if (state.asset) {
+    loadAssetDetail(state.asset);
+  } else {
+    detailArea.innerHTML = '<div class="empty">Enter an asset ID above, or click "Scan QR" / "Sample QR Codes" to inspect or report an asset.</div>';
+  }
 }
 
 async function myReportsView(main) {
@@ -773,6 +822,16 @@ async function assets(main) {
     }
     activeAssetScanner = mountScanner((aid) => {
       activeAssetScanner = null;
+      search.querySelectorAll('button, input').forEach(b => b.disabled = true);
+      search.after(el(`<div class="loading-screen" style="margin-top:12px">
+        <div class="spinner"></div>
+        <h3>Na-scan ang QR Code · Loading Asset Record</h3>
+        <p>Kinukuha ang rekord ng pasilidad mula sa rehistro…<br>Fetching asset details and maintenance history…</p>
+        <div class="loading-asset-tag">
+          <span class="live-dot" style="background:var(--ph-blue);box-shadow:none"></span>
+          ${esc(aid)}
+        </div>
+      </div>`));
       go('assets', aid);
     }, () => {
       activeAssetScanner = null;
