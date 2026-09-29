@@ -18,7 +18,7 @@ def main() -> int:
     ap.add_argument("--reset", action="store_true", help="delete the database and seed again")
     ap.add_argument("--seed-only", action="store_true")
     ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default="0.0.0.0")
     args = ap.parse_args()
 
     db.init_db(reset=args.reset)

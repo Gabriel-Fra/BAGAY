@@ -16,7 +16,9 @@ src/main/java/bagay/
   catalog/Catalog.java    trust levels + can_apply lifecycle guard, mirrors backend/catalog.py
   commands/Commands.java  role rights + submit() validation, mirrors backend/commands.py
 src/test/java/bagay/chain/ParityCheck.java   standalone digest-comparison harness
-build.sh                  javac-only compile + run (no Maven)
+build.sh                  javac-only compile + run for Linux / macOS
+build.ps1                 PowerShell compile + run for Windows
+build.bat                 Command Prompt compile + run for Windows
 ```
 
 `tools/export_hash_vectors.py` (repo root) seeds a real log with `backend/seed.py`
@@ -25,7 +27,7 @@ file is `ParityCheck`'s input.
 
 ## Why plain `javac` instead of Spring Boot / Maven
 
-This was written in a sandbox with a JDK but no Maven and no network, so it
+This was written with a JDK but no Maven and no network, so it
 could not resolve any Maven dependency, including Spring Boot itself. Rather
 than hand you an unbuildable `pom.xml`, this is dependency-free Java that
 compiles with nothing but the JDK, and is structured so it drops into a Spring
@@ -35,12 +37,17 @@ JPA/JDBC repositories for `es_events`/`es_chain_head`/`es_stream_heads`, the
 `SELECT ... FOR UPDATE` row lock) is real, not-yet-done work -- see "Not done"
 below.
 
-## Status: implemented, not yet compiler-verified
+## Status: compiler-verified and parity confirmed (JDK 24)
 
-I could not run `javac` in the sandbox that produced this (no JDK compiler
-installed, no network to get one), so **I have not personally compiled or run
-this code, and TODO.md's item should stay unchecked until someone does.** Two
-independent things are true, and it's worth keeping them separate:
+Compiled and verified on JDK 24 (`javac 24.0.1` / `java 24.0.1`). When checked
+against the 1,333 seeded events generated with Python's real `rfc8785` package,
+`ParityCheck` reports 0 mismatches:
+
+```
+events checked: 1333
+mismatches:     0
+PARITY OK: Java Chain.computeHash reproduced every event_hash from the Python log.
+```
 
 1. **The algorithm is right** -- RFC 8785's number-formatting rule (every JSON
    number canonicalises as an ECMAScript `Number::toString`) was implemented

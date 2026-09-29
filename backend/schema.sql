@@ -128,7 +128,8 @@ CREATE TABLE IF NOT EXISTS proj_work_queue (
   due_on        TEXT,
   started_at    TEXT,
   completed_at  TEXT,
-  actual_cost   REAL
+  actual_cost   REAL,
+  photo_ref     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proj_hazard_events (

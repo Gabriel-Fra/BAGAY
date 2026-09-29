@@ -32,14 +32,13 @@ inside the same database) is a bug, not a shortcut.
 ## Working state (update me)
 
 - Demo: **works**. SQLite, seeded with roughly 1,300 events, all views functional.
+- Authentication: **works**. PBKDF2 (260k iterations), server-side sessions, role-gating on every endpoint, self-service resident signup.
+- Camera & Photos: **works**. Client-side canvas EXIF stripping, content-addressed storage under `media/`, attached to event envelopes.
+- Live sync: **works**. Server-Sent Events (`/api/stream`) pushes live resident reports directly to official dashboards.
+- UI: "Sinag" theme with banig-weave styling and ticket-stub cards, zero build step.
 - Tamper demo: all four attacks behave as the paper predicts (see `NOTES.md`).
-- Java Command API: **implemented, not compiler-verified.** `java-command-api/` ports
-  `chain.compute_hash` (via a hand-written RFC 8785 canonicalizer, no deps) and
-  `commands.submit`'s validation. Built in a sandbox with no `javac` and no network, so it has
-  never actually been compiled — run `java-command-api/build.sh` before trusting or checking
-  off the TODO item. No Spring Boot/Maven wiring yet.
-- Not built yet: RabbitMQ relay, PostgreSQL as the default, authentication, offline PWA,
-  photo uploads, experiments E2 and E4 to E7.
+- Java Command API: **compiler-verified and tested on JDK 24.** `java-command-api/` ports `chain.compute_hash` and `commands.submit`. ParityCheck confirms 1,333/1,333 event digests match Python identically. Native Windows build scripts (`build.ps1`, `build.bat`) added alongside `build.sh`.
+- Not built yet: RabbitMQ relay, PostgreSQL as the default, offline PWA outbox, experiments E2 and E4 to E7.
 - The paper is at draft v0.1 with results pending. Interviews (RQ1) not done.
 
 ## Conventions

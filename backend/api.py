@@ -13,6 +13,7 @@ import io
 import json
 import pathlib
 import queue
+import re
 import zipfile
 
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query
@@ -164,6 +165,51 @@ def upload_photo(body: dict = Body(...), user: dict = Depends(require_user)):
     if not path.exists():
         path.write_bytes(raw)
     return {"hash": digest, "contentType": content_type, "url": f"/media/{digest[:2]}/{digest}.{ext}"}
+
+
+@app.post("/api/qr/decode")
+def decode_qr(body: dict = Body(...)):
+    """Decode a QR code image submitted as a data URL (camera frame or file upload).
+    Returns the decoded text and extracted asset ID without requiring user login."""
+    data_url = body.get("dataUrl", "")
+    if not data_url.startswith("data:image/"):
+        raise HTTPException(400, "expected a data: image URL")
+    _, _, b64 = data_url.partition(",")
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as exc:
+        raise HTTPException(400, "could not decode image data") from exc
+
+    text = ""
+    try:
+        import cv2
+        import numpy as np
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is not None:
+            detector = cv2.QRCodeDetector()
+            val, _, _ = detector.detectAndDecode(img)
+            text = (val or "").strip()
+            if not text:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                val, _, _ = detector.detectAndDecode(gray)
+                text = (val or "").strip()
+            if not text:
+                resized = cv2.resize(img, (0, 0), fx=1.5, fy=1.5, interpolation=cv2.INTER_LINEAR)
+                val, _, _ = detector.detectAndDecode(resized)
+                text = (val or "").strip()
+    except Exception:
+        pass
+
+    asset_id = None
+    if text:
+        m = re.search(r"(BGY-[A-Za-z0-9-]+)", text, re.IGNORECASE)
+        if m:
+            asset_id = m.group(1).upper()
+        else:
+            asset_id = text.strip().upper()
+
+    return {"found": bool(asset_id), "text": text, "asset_id": asset_id}
 
 
 # =============================================================== queries

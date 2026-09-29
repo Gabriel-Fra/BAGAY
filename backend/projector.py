@@ -95,13 +95,25 @@ def _apply_workflow(conn: db.Conn, e: dict) -> None:
                      (p.get("decision"), p.get("duplicate_of"), e["occurred_at"], p["issue_id"]))
     elif t == "WorkOrderOpened":
         verb = "INSERT OR REPLACE INTO" if not db.IS_PG else "INSERT INTO"
+        photo = _first_photo(e)
+        if not photo and p.get("source_issue_id"):
+            row = conn.one("SELECT photo_ref FROM proj_issue_inbox WHERE issue_id = ?", (p["source_issue_id"],))
+            photo = (row or {}).get("photo_ref")
+        if not photo and asset_id:
+            row = conn.one("SELECT photo_ref FROM proj_asset_timeline WHERE asset_id = ? AND photo_ref IS NOT NULL ORDER BY global_position DESC LIMIT 1", (asset_id,))
+            photo = (row or {}).get("photo_ref")
         conn.execute(f"{verb} proj_work_queue (work_order_id, asset_id, priority, status, opened_at, "
-                     f"due_on) VALUES (?, ?, ?, 'OPEN', ?, ?)",
+                     f"due_on, photo_ref) VALUES (?, ?, ?, 'OPEN', ?, ?, ?)",
                      (p["work_order_id"], asset_id, p.get("priority", "P3"), e["occurred_at"],
-                      p.get("due_on")))
+                      p.get("due_on"), photo))
     elif t == "RepairStarted":
-        conn.execute("UPDATE proj_work_queue SET status = 'IN_PROGRESS', started_at = ? "
-                     "WHERE work_order_id = ?", (e["occurred_at"], p["work_order_id"]))
+        photo = _first_photo(e)
+        if photo:
+            conn.execute("UPDATE proj_work_queue SET status = 'IN_PROGRESS', started_at = ?, photo_ref = ? "
+                         "WHERE work_order_id = ?", (e["occurred_at"], photo, p["work_order_id"]))
+        else:
+            conn.execute("UPDATE proj_work_queue SET status = 'IN_PROGRESS', started_at = ? "
+                         "WHERE work_order_id = ?", (e["occurred_at"], p["work_order_id"]))
     elif t == "RepairCompleted":
         conn.execute("UPDATE proj_work_queue SET status = 'DONE', completed_at = ?, actual_cost = ? "
                      "WHERE work_order_id = ?",

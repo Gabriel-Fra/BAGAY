@@ -149,7 +149,7 @@ def declare_hazard(conn, *, hazard_id, name, hazard_type, started_on, ended_on=N
 
 def seal_turnover(conn, *, psgc, outgoing_term, incoming_term, witnesses, actor_role="PUNONG_BARANGAY"):
     cp = chain.create_checkpoint(conn, reason="TURNOVER")
-    assets = conn.one("SELECT COUNT(*) AS c FROM proj_asset_current")
+    assets = conn.one("SELECT COUNT(*) AS c FROM es_stream_heads WHERE stream_id LIKE 'asset:%'")
     return submit(conn, asset_id=None, stream_id=f"barangay:{psgc}", event_type="TurnoverSealed",
                   actor_role=actor_role,
                   payload={"checkpoint_position": cp["position"], "checkpoint_hash": cp["head_hash"],
