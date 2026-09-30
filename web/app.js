@@ -461,9 +461,16 @@ function mountScanner(onDetected, onClose) {
           }
         }
 
-        // Pass 3: Periodic server fallback (every 5th frame, ~500ms)
-        if (frameCount % 5 === 0) {
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // Pass 3: Periodic server fallback only if client detectors are missing or after persistent failure
+        const hasClientDetector = !!(window.jsQR || barcodeDetector);
+        if ((!hasClientDetector && frameCount % 6 === 0) || (frameCount % 25 === 0)) {
+          const thumb = document.createElement('canvas');
+          const maxDim = 480;
+          const s = Math.min(1, maxDim / Math.max(w, h));
+          thumb.width = Math.round(w * s);
+          thumb.height = Math.round(h * s);
+          thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height);
+          const dataUrl = thumb.toDataURL('image/jpeg', 0.70);
           const res = await api('/api/qr/decode', { method: 'POST', body: { dataUrl } }).catch(() => null);
           if (res && res.found && res.asset_id) {
             handleSuccess(res.asset_id);

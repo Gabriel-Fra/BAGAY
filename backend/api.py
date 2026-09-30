@@ -17,6 +17,7 @@ import re
 import zipfile
 
 from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -26,6 +27,17 @@ WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
 MEDIA = pathlib.Path(__file__).resolve().parent.parent / "media"
 MEDIA.mkdir(exist_ok=True)
 app = FastAPI(title="BAGAY demo", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+@app.middleware("http")
+async def add_cache_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    elif request.url.path.startswith("/media/"):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 def conn() -> db.Conn:
@@ -525,12 +537,12 @@ def log_tail(limit: int = 30, after: int = 0, user: dict = Depends(require_offic
 # =============================================================== static web app
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (WEB / "index.html").read_text()
+    return (WEB / "index.html").read_text(encoding="utf-8")
 
 
 @app.get("/a/{asset_id}", response_class=HTMLResponse)
 def qr_landing(asset_id: str):
-    return (WEB / "index.html").read_text().replace("__BOOT__", f'{{"view":"public","asset":"{asset_id}"}}')
+    return (WEB / "index.html").read_text(encoding="utf-8").replace("__BOOT__", f'{{"view":"public","asset":"{asset_id}"}}')
 
 
 @app.get("/favicon.ico")
