@@ -98,6 +98,7 @@ function renderChrome() {
 async function go(view, asset) {
   state.view = view;
   if (asset !== undefined) state.asset = asset;
+  document.body.classList.toggle('on-login', view === 'login'); 
   renderChrome();
   const main = document.getElementById('app');
   main.innerHTML = '<p class="note">Loading…</p>';
@@ -107,6 +108,7 @@ async function go(view, asset) {
     if (e.status === 401) { state.user = null; return go('login'); }
     main.innerHTML = `<div class="bad-box">${esc(e.data && e.data.detail ? e.data.detail : e.message)}</div>`;
   }
+  
 }
 
 /* ------------------------------------------------------------------ auth */

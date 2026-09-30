@@ -576,6 +576,12 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   justify-content: center;
   padding: 30px 16px;
+  
+}
+
+
+body.on-login {
+  background: url("/static/login-bg.png") center / cover no-repeat fixed;
 }
 
 .auth-card {
@@ -587,6 +593,8 @@ input:focus, select:focus, textarea:focus {
   padding: 28px 24px;
   box-shadow: var(--shadow-md);
   border-top: 4px solid var(--ph-blue);
+  backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .auth-card h1 {
@@ -1130,4 +1138,9 @@ input:focus, select:focus, textarea:focus {
   main { padding: 16px 12px 60px; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
   .tickets { grid-template-columns: 1fr; }
+}
+
+body.on-login header.top {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
 }
