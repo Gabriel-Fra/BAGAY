@@ -147,6 +147,7 @@ async function loginView(main) {
   const demoEl = wrap.querySelector('#demo');
 
   function renderForm() {
+    wrap.querySelector('.auth-card').classList.toggle('is-official', role === 'OFFICIAL');
     wrap.querySelectorAll('.role-pick button').forEach(b =>
       b.setAttribute('aria-pressed', b.dataset.role === role || (role === 'OFFICIAL' && b.dataset.role === 'OFFICIAL') ? 'true' : 'false'));
 
@@ -167,7 +168,7 @@ async function loginView(main) {
       form.innerHTML = `
         <div class="field"><label>Username</label><input id="username" placeholder="username" required></div>
         <div class="field"><label>Password</label><input id="password" type="password" required></div>
-        <button class="act ${role === 'PUBLIC' ? 'gold' : 'solid'}" style="width:100%;justify-content:center" id="submit">Sign in</button>`;
+        <button class="act gold" style="width:100%;justify-content:center" id="submit">Sign in</button>`;
       switchEl.innerHTML = '';
       if (role === 'PUBLIC') {
         const sw = el('<button class="linklike">Bagong residente? Magparehistro · New here? Register</button>');

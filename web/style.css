@@ -597,6 +597,23 @@ body.on-login {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.auth-card {
+  border-top-color: var(--ph-blue);
+  transition: border-top-color 0.5s ease, box-shadow 0.5s ease;
+}
+.auth-card .fil {
+  color: var(--ph-blue);
+  transition: color 0.5s ease;
+}
+
+.auth-card:has(.role-pick button[data-role="OFFICIAL"][aria-pressed="true"]) {
+  border-top-color: var(--ph-red);
+  box-shadow: 0 4px 12px -2px rgba(206, 17, 38, 0.18);
+}
+.auth-card:has(.role-pick button[data-role="OFFICIAL"][aria-pressed="true"]) .fil {
+  color: var(--ph-red);
+}
+
 .auth-card h1 {
   font-size: 21px;
   margin-bottom: 4px;
@@ -651,6 +668,15 @@ body.on-login {
   color: var(--ph-blue);
 }
 
+.role-pick button[data-role="OFFICIAL"][aria-pressed="true"] {
+  border-color: var(--ph-red);
+  background: var(--ph-red-light);
+}
+
+.role-pick button[data-role="OFFICIAL"][aria-pressed="true"] b {
+  color: var(--ph-red);
+}
+
 .field {
   margin-bottom: 12px;
   display: flex;
@@ -690,7 +716,7 @@ body.on-login {
   cursor: pointer;
 }
 
-/* ---------------------------------------------------------------- Resident Flow */
+
 .res-hero {
   border-radius: var(--radius);
   padding: 20px 24px;
@@ -799,7 +825,7 @@ body.on-login {
   text-decoration: underline;
 }
 
-/* ---------------------------------------------------------------- QR Code Sample Showcase Modal/Card */
+
 .qr-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -844,7 +870,7 @@ body.on-login {
   color: var(--text-muted);
 }
 
-/* ---------------------------------------------------------------- QR Scanner Component */
+
 .scanner-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -950,7 +976,7 @@ body.on-login {
   pointer-events: none;
 }
 
-/* ---------------------------------------------------------------- Asset Loading Screen */
+
 .loading-screen {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -1015,7 +1041,7 @@ body.on-login {
   letter-spacing: 0.02em;
 }
 
-/* ---------------------------------------------------------------- Notifications & Utilities */
+
 .live-dot {
   width: 8px;
   height: 8px;
@@ -1057,7 +1083,7 @@ body.on-login {
   to { opacity: 1; transform: none; }
 }
 
-/* Lightbox Modal */
+
 .lightbox-backdrop {
   position: fixed;
   inset: 0;
@@ -1144,3 +1170,82 @@ body.on-login header.top {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(6px);
 }
+
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
+}
+
+
+header.top {
+  background: #FFFFFF;
+  color: var(--text-main);
+  padding: calc(12px + env(safe-area-inset-top, 0)) 28px 12px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+
+header.top::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  bottom: auto;
+  height: 5px;
+  background: linear-gradient(90deg, #0038A8 0 33.33%, #FCD116 33.33% 66.66%, #CE1126 66.66% 100%);
+}
+
+
+.brand { gap: 12px; }
+.brand-logo {
+  height: 48px;
+  width: auto;
+  display: block;
+  object-fit: contain;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.brand-text small {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-sub);
+}
+
+
+nav { gap: 30px; }
+nav button {
+  position: relative;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 6px 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+nav button:hover {
+  background: none;
+  color: var(--ph-blue);
+}
+nav button[aria-current="true"] {
+  background: none;
+  color: var(--ph-blue);
+}
+nav button[aria-current="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #CE1126;
+}
+
