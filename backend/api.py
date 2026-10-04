@@ -34,7 +34,10 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 async def add_cache_headers(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "public, max-age=3600"
+        if request.url.path.endswith((".js", ".css")):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=3600"
     elif request.url.path.startswith("/media/"):
         response.headers["Cache-Control"] = "public, max-age=86400"
     return response
