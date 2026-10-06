@@ -77,7 +77,10 @@ SAMPLE_SVGS = {
 
 def _ensure_sample_photos() -> dict[str, dict]:
     import os
-    _media_env = os.environ.get("BAGAY_MEDIA_DIR") or ("/tmp/media" if os.environ.get("VERCEL") else None)
+    from . import db
+    _media_env = os.environ.get("BAGAY_MEDIA_DIR")
+    if not _media_env and db.is_serverless():
+        _media_env = "/tmp/media"
     media_dir = pathlib.Path(_media_env) if _media_env else (pathlib.Path(__file__).resolve().parent.parent / "media")
     try:
         media_dir.mkdir(parents=True, exist_ok=True)

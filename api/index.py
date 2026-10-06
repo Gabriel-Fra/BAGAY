@@ -11,13 +11,6 @@ root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-# Default to /tmp when running on Vercel without external DB/media
-if "BAGAY_DB" not in os.environ and os.environ.get("VERCEL"):
-    os.environ["BAGAY_DB"] = "sqlite:////tmp/bagay_demo.db"
-
-if "BAGAY_MEDIA_DIR" not in os.environ and os.environ.get("VERCEL"):
-    os.environ["BAGAY_MEDIA_DIR"] = "/tmp/media"
-
 from backend import chain, db, seed
 from backend.api import app
 
@@ -37,4 +30,6 @@ try:
     finally:
         conn.close()
 except Exception as exc:
-    print(f"[BAGAY Init] Startup DB notice: {exc}", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
+

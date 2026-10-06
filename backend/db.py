@@ -11,7 +11,28 @@ import pathlib
 import sqlite3
 import threading
 
-DB_URL = os.environ.get("BAGAY_DB") or ("sqlite:////tmp/bagay_demo.db" if os.environ.get("VERCEL") else "sqlite:///bagay_demo.db")
+def is_serverless() -> bool:
+    if any(os.environ.get(k) for k in ("VERCEL", "VERCEL_ENV", "VERCEL_REGION", "AWS_LAMBDA_FUNCTION_NAME", "LAMBDA_TASK_ROOT", "NOW_REGION")):
+        return True
+    try:
+        test_file = pathlib.Path(__file__).parent / "._write_test"
+        test_file.touch()
+        test_file.unlink(missing_ok=True)
+        return False
+    except Exception:
+        return True
+
+
+def get_db_url() -> str:
+    url = os.environ.get("BAGAY_DB")
+    if not url:
+        if is_serverless():
+            return "sqlite:////tmp/bagay_demo.db"
+        return "sqlite:///bagay_demo.db"
+    return url
+
+
+DB_URL = get_db_url()
 IS_PG = DB_URL.startswith("postgres")
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
 
@@ -53,13 +74,17 @@ class Conn:
 
 
 def connect() -> Conn:
-    if IS_PG:
+    url = os.environ.get("BAGAY_DB") or get_db_url()
+    if url.startswith("postgres"):
         import psycopg  # imported lazily so SQLite users need no driver
 
-        return Conn(psycopg.connect(DB_URL))
-    path = DB_URL.replace("sqlite:///", "")
+        return Conn(psycopg.connect(url))
+    path = url.replace("sqlite:///", "")
     raw = sqlite3.connect(path, isolation_level=None, timeout=30)
-    raw.execute("PRAGMA journal_mode=WAL")
+    try:
+        raw.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
     raw.execute("PRAGMA foreign_keys=ON")
     raw.execute("BEGIN")          # keep the explicit transaction model of the real system
     raw.commit()
@@ -93,13 +118,23 @@ def wipe(conn: "Conn") -> None:
 
 
 def init_db(reset: bool = False) -> None:
-    if reset and not IS_PG:
-        path = pathlib.Path(DB_URL.replace("sqlite:///", ""))
+    url = os.environ.get("BAGAY_DB") or get_db_url()
+    is_pg = url.startswith("postgres")
+    if reset and not is_pg:
+        path = pathlib.Path(url.replace("sqlite:///", ""))
         for p in (path, path.with_suffix(path.suffix + "-wal"), path.with_suffix(path.suffix + "-shm")):
             p.unlink(missing_ok=True)
     conn = connect()
-    sql = SCHEMA.read_text()
-    if IS_PG:
+    if SCHEMA.exists():
+        sql = SCHEMA.read_text(encoding="utf-8")
+    else:
+        for p in [pathlib.Path.cwd() / "backend" / "schema.sql", pathlib.Path("/var/task/backend/schema.sql")]:
+            if p.exists():
+                sql = p.read_text(encoding="utf-8")
+                break
+        else:
+            raise FileNotFoundError(f"schema.sql not found at {SCHEMA}")
+    if is_pg:
         sql = (sql.replace("TEXT PRIMARY KEY", "TEXT PRIMARY KEY")
                   .replace("INTEGER PRIMARY KEY", "BIGINT PRIMARY KEY"))
     for stmt in [s.strip() for s in sql.split(";\n") if s.strip()]:

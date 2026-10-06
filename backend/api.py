@@ -25,14 +25,44 @@ from fastapi.staticfiles import StaticFiles
 from . import auth, catalog, chain, commands, db, projector
 
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
-_media_env = os.environ.get("BAGAY_MEDIA_DIR") or ("/tmp/media" if os.environ.get("VERCEL") else None)
-MEDIA = pathlib.Path(_media_env) if _media_env else (pathlib.Path(__file__).resolve().parent.parent / "media")
-try:
-    MEDIA.mkdir(parents=True, exist_ok=True)
-except Exception:
-    pass
+def _get_media_dir() -> pathlib.Path:
+    _media_env = os.environ.get("BAGAY_MEDIA_DIR")
+    if not _media_env and db.is_serverless():
+        _media_env = "/tmp/media"
+    p = pathlib.Path(_media_env) if _media_env else (pathlib.Path(__file__).resolve().parent.parent / "media")
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return p
+
+MEDIA = _get_media_dir()
 app = FastAPI(title="BAGAY demo", version="0.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    import traceback
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {str(exc)}", "traceback": traceback.format_exc()}
+    )
+
+
+@app.get("/api/health")
+def health():
+    try:
+        c = conn()
+        h = chain.head(c)
+        user_count = c.one("SELECT COUNT(*) AS c FROM iam_users")["c"]
+        return {"status": "ok", "db": db.get_db_url(), "head": h, "users": user_count}
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(e), "traceback": traceback.format_exc(), "db_url": db.get_db_url()}
+        )
 
 
 @app.middleware("http")
