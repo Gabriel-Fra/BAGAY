@@ -243,7 +243,8 @@ def build(conn: db.Conn, *, assets_per_category=1.0, seed: int = 20260915) -> di
     for username, password, display_name, role, purok in DEMO_ACCOUNTS:
         try:
             auth.create_user(conn, username=username, password=password,
-                             display_name=display_name, role=role, purok=purok)
+                             display_name=display_name, role=role, purok=purok,
+                             user_id=f"user:{username}")
         except ValueError:
             pass
 

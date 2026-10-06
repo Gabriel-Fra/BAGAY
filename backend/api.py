@@ -106,8 +106,10 @@ def require_official(user: dict = Depends(require_user)) -> dict:
 
 
 def _set_session_cookie(resp: JSONResponse, session_id: str) -> JSONResponse:
+    # Set secure=True on HTTPS (e.g. Vercel) or when not explicitly insecure
+    is_secure = db.is_serverless() or os.environ.get("VERCEL") is not None
     resp.set_cookie(auth.COOKIE_NAME, session_id, httponly=True, samesite="lax",
-                    max_age=auth.SESSION_TTL_HOURS * 3600)
+                    secure=is_secure, max_age=auth.SESSION_TTL_HOURS * 3600, path="/")
     return resp
 
 
