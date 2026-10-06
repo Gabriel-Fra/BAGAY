@@ -76,17 +76,25 @@ SAMPLE_SVGS = {
 
 
 def _ensure_sample_photos() -> dict[str, dict]:
-    media_dir = pathlib.Path(__file__).resolve().parent.parent / "media"
-    media_dir.mkdir(exist_ok=True)
+    import os
+    _media_env = os.environ.get("BAGAY_MEDIA_DIR") or ("/tmp/media" if os.environ.get("VERCEL") else None)
+    media_dir = pathlib.Path(_media_env) if _media_env else (pathlib.Path(__file__).resolve().parent.parent / "media")
+    try:
+        media_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
     res = {}
     for key, svg_text in SAMPLE_SVGS.items():
         raw = svg_text.encode("utf-8")
         digest = hashlib.sha256(raw).hexdigest()
         sub = media_dir / digest[:2]
-        sub.mkdir(exist_ok=True)
-        path = sub / f"{digest}.svg"
-        if not path.exists():
-            path.write_bytes(raw)
+        try:
+            sub.mkdir(parents=True, exist_ok=True)
+            path = sub / f"{digest}.svg"
+            if not path.exists():
+                path.write_bytes(raw)
+        except Exception:
+            pass
         res[key] = {"hash": digest, "url": f"/media/{digest[:2]}/{digest}.svg", "contentType": "image/svg+xml"}
     return res
 

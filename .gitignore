@@ -10,3 +10,4 @@ venv/
 media/
 java-command-api/out/
 *.class
+.vercel/

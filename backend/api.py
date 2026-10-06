@@ -11,6 +11,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import pathlib
 import queue
 import re
@@ -24,8 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from . import auth, catalog, chain, commands, db, projector
 
 WEB = pathlib.Path(__file__).resolve().parent.parent / "web"
-MEDIA = pathlib.Path(__file__).resolve().parent.parent / "media"
-MEDIA.mkdir(exist_ok=True)
+_media_env = os.environ.get("BAGAY_MEDIA_DIR") or ("/tmp/media" if os.environ.get("VERCEL") else None)
+MEDIA = pathlib.Path(_media_env) if _media_env else (pathlib.Path(__file__).resolve().parent.parent / "media")
+try:
+    MEDIA.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 app = FastAPI(title="BAGAY demo", version="0.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=500)
 

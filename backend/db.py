@@ -11,7 +11,7 @@ import pathlib
 import sqlite3
 import threading
 
-DB_URL = os.environ.get("BAGAY_DB", "sqlite:///bagay_demo.db")
+DB_URL = os.environ.get("BAGAY_DB") or ("sqlite:////tmp/bagay_demo.db" if os.environ.get("VERCEL") else "sqlite:///bagay_demo.db")
 IS_PG = DB_URL.startswith("postgres")
 SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
 
