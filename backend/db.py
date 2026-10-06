@@ -25,6 +25,9 @@ def is_serverless() -> bool:
 
 def get_db_url() -> str:
     url = os.environ.get("BAGAY_DB")
+    # Guard against unreplaced placeholders like <host>, <password>, <user>
+    if url and any(bracket in url for bracket in ("<host>", "<user>", "<password>", "<dbname>")):
+        url = None
     if not url:
         if is_serverless():
             return "sqlite:////tmp/bagay_demo.db"
@@ -39,8 +42,8 @@ SCHEMA = pathlib.Path(__file__).with_name("schema.sql")
 _local = threading.local()
 
 
-def _translate(sql: str) -> str:
-    return sql.replace("?", "%s") if IS_PG else sql
+def _translate(sql: str, is_pg: bool) -> str:
+    return sql.replace("?", "%s") if is_pg else sql
 
 
 class Conn:
@@ -48,10 +51,11 @@ class Conn:
 
     def __init__(self, raw):
         self.raw = raw
+        self.is_pg = getattr(raw, "__class__", type("")).__module__.startswith("psycopg")
 
     def execute(self, sql, params=()):
         cur = self.raw.cursor()
-        cur.execute(_translate(sql), tuple(params))
+        cur.execute(_translate(sql, self.is_pg), tuple(params))
         return cur
 
     def query(self, sql, params=()) -> list[dict]:
@@ -74,11 +78,19 @@ class Conn:
 
 
 def connect() -> Conn:
-    url = os.environ.get("BAGAY_DB") or get_db_url()
+    url = get_db_url()
     if url.startswith("postgres"):
         import psycopg  # imported lazily so SQLite users need no driver
+        try:
+            return Conn(psycopg.connect(url))
+        except Exception as exc:
+            if is_serverless():
+                import sys
+                print(f"[BAGAY DB] PostgreSQL connection error ({exc}). Falling back to /tmp/bagay_demo.db", file=sys.stderr)
+                url = "sqlite:////tmp/bagay_demo.db"
+            else:
+                raise
 
-        return Conn(psycopg.connect(url))
     path = url.replace("sqlite:///", "")
     raw = sqlite3.connect(path, isolation_level=None, timeout=30)
     try:
@@ -157,7 +169,7 @@ def set_immutability(conn: Conn, enabled: bool) -> None:
     Production never calls this; it exists so the tamper demo can show that the hash
     chain still catches an attacker who can turn the guard rails off.
     """
-    if IS_PG:
+    if conn.is_pg:
         state = "ENABLE" if enabled else "DISABLE"
         conn.execute(f"ALTER TABLE es_events {state} TRIGGER USER")
     else:
